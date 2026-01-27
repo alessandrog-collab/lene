@@ -293,11 +293,11 @@
             <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
                 <div class="filter-group">
                     <label>Da:</label>
-                    <input type="date" id="dateFrom" class="date-input">
+                    <input type="date" id="dateFrom" class="date-input" onchange="loadData()">
                 </div>
                 <div class="filter-group">
                     <label>A:</label>
-                    <input type="date" id="dateTo" class="date-input">
+                    <input type="date" id="dateTo" class="date-input" onchange="loadData()">
                 </div>
                 <button class="refresh-btn" onclick="loadData()">↻ Aggiorna</button>
                 <div class="last-update">
@@ -342,6 +342,11 @@
             <div class="chart-title">Dettaglio Topic - Chiamate Gestite da AI</div>
             <div class="legend-grid" id="legendGrid"></div>
         </div>
+        
+        <div class="chart-container">
+            <div class="chart-title">Chiamate Giornaliere</div>
+            <div id="daily_chart" style="width: 100%; height: 350px;"></div>
+        </div>
     </div>
 
     <script>
@@ -379,13 +384,16 @@
             }
         }
 
-        google.charts.load('current', {'packages':['sankey']});
+        google.charts.load('current', {'packages':['sankey', 'corechart']});
         google.charts.setOnLoadCallback(function() {
             // Solo se già autenticato
             if (sessionStorage.getItem('lene_auth') === 'true') {
                 loadData();
             }
         });
+        
+        // Variabile globale per i dati giornalieri
+        let dailyCallsData = [];
         
         // Google Sheet CSV URL
         const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vT1J6kQswwzL9zmj7y_lis4jvKGUYRTyFfjZGXVfL22l-JEHDYUeC2aapUVzObvFhhJu8be7hdcIhKN/pub?gid=0&single=true&output=csv';
@@ -512,6 +520,8 @@
                 const motivo = row['Motivo chiamata'] || 'Non identificato';
                 // Colonna O = "Invio preventivo" (valori: SI o vuoto)
                 const preventivo = row['Invio preventivo'] || '';
+                // Colonna B = "Data inizio" per istogramma
+                const dataChiamata = row['Data inizio'] || row['Data'] || '';
                 
                 // LIVELLO 1: Solo AI vs Operatore (niente Tool Error)
                 let livello1;
@@ -533,7 +543,18 @@
                 
                 let livello3 = hasPreventivo ? 'Preventivo inviato' : 'Nessuna conversione';
                 
-                return { livello1, livello2, livello3, hasPreventivo };
+                // Estrai data per istogramma (formato DD/MM/YYYY)
+                let dateKey = 'Sconosciuta';
+                if (dataChiamata) {
+                    if (dataChiamata.includes('/')) {
+                        dateKey = dataChiamata.split(' ')[0]; // Prendi solo la data, non l'ora
+                    } else if (dataChiamata.includes('-')) {
+                        const parts = dataChiamata.split('T')[0].split('-');
+                        dateKey = `${parts[2]}/${parts[1]}/${parts[0]}`;
+                    }
+                }
+                
+                return { livello1, livello2, livello3, hasPreventivo, dateKey };
             });
             
             // Conta statistiche
@@ -660,6 +681,55 @@
                 legendGrid.appendChild(item);
                 colorIndex++;
             });
+            
+            // ISTOGRAMMA CHIAMATE GIORNALIERE
+            const dailyCounts = {};
+            processedData.forEach(row => {
+                const d = row.dateKey;
+                if (d && d !== 'Sconosciuta') {
+                    dailyCounts[d] = (dailyCounts[d] || 0) + 1;
+                }
+            });
+            
+            // Ordina per data
+            const sortedDays = Object.entries(dailyCounts).sort((a, b) => {
+                const partsA = a[0].split('/');
+                const partsB = b[0].split('/');
+                const dateA = new Date(partsA[2], partsA[1] - 1, partsA[0]);
+                const dateB = new Date(partsB[2], partsB[1] - 1, partsB[0]);
+                return dateA - dateB;
+            });
+            
+            // Crea dati per il grafico
+            const dailyChartData = new google.visualization.DataTable();
+            dailyChartData.addColumn('string', 'Data');
+            dailyChartData.addColumn('number', 'Chiamate');
+            dailyChartData.addColumn({type: 'string', role: 'style'});
+            
+            sortedDays.forEach(([date, count]) => {
+                dailyChartData.addRow([date, count, '#667eea']);
+            });
+            
+            const dailyOptions = {
+                backgroundColor: 'transparent',
+                legend: { position: 'none' },
+                chartArea: { width: '90%', height: '75%' },
+                hAxis: {
+                    textStyle: { color: '#8892b0', fontSize: 11 },
+                    slantedText: true,
+                    slantedTextAngle: 45
+                },
+                vAxis: {
+                    textStyle: { color: '#8892b0' },
+                    gridlines: { color: 'rgba(255,255,255,0.05)' },
+                    minValue: 0
+                },
+                bar: { groupWidth: '70%' },
+                colors: ['#667eea']
+            };
+            
+            const dailyChart = new google.visualization.ColumnChart(document.getElementById('daily_chart'));
+            dailyChart.draw(dailyChartData, dailyOptions);
         }
         
         // Auto-refresh ogni 5 minuti
