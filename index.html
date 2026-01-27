@@ -458,32 +458,46 @@
             const dateFrom = document.getElementById('dateFrom').value;
             const dateTo = document.getElementById('dateTo').value;
             
+            console.log('Date filters:', { dateFrom, dateTo });
+            console.log('Available columns:', Object.keys(data[0]));
+            console.log('Sample date value:', data[0]['Data inizio'] || data[0]['Data'] || data[0]['Timestamp'] || 'NOT FOUND');
+            
             if (dateFrom || dateTo) {
                 data = data.filter(row => {
-                    // Colonna B = "Data inizio" o simile
-                    const dataChiamata = row['Data inizio'] || row['Data'] || row['Timestamp'] || '';
+                    // Colonna D = "Data chiamata"
+                    const dataChiamata = row['Data chiamata'] || row['Data inizio'] || row['Data'] || '';
                     if (!dataChiamata) return true;
                     
-                    // Prova a parsare la data (formato DD/MM/YYYY o YYYY-MM-DD)
+                    // Formato: YYYY-MM-DD HH:MM o YYYY-MM-DD HH:MM:SS
                     let rowDate;
-                    if (dataChiamata.includes('/')) {
-                        const parts = dataChiamata.split(' ')[0].split('/');
+                    const dateStr = dataChiamata.toString().trim();
+                    
+                    if (dateStr.includes('-')) {
+                        // Formato YYYY-MM-DD HH:MM
+                        const datePart = dateStr.split(' ')[0];
+                        rowDate = new Date(datePart);
+                    } else if (dateStr.includes('/')) {
+                        // Formato DD/MM/YYYY
+                        const parts = dateStr.split(' ')[0].split('/');
                         if (parts.length === 3) {
-                            rowDate = new Date(parts[2], parts[1] - 1, parts[0]);
+                            rowDate = new Date(parts[2], parseInt(parts[1]) - 1, parts[0]);
                         }
-                    } else {
-                        rowDate = new Date(dataChiamata);
                     }
                     
-                    if (isNaN(rowDate)) return true;
+                    if (!rowDate || isNaN(rowDate.getTime())) return true;
                     
                     const fromDate = dateFrom ? new Date(dateFrom) : null;
                     const toDate = dateTo ? new Date(dateTo) : null;
+                    
+                    // Aggiungi un giorno a toDate per includere tutto il giorno finale
+                    if (toDate) toDate.setHours(23, 59, 59, 999);
                     
                     if (fromDate && rowDate < fromDate) return false;
                     if (toDate && rowDate > toDate) return false;
                     return true;
                 });
+                
+                console.log('Rows after date filter:', data.length);
             }
             
             if (data.length === 0) {
@@ -520,8 +534,8 @@
                 const motivo = row['Motivo chiamata'] || 'Non identificato';
                 // Colonna O = "Invio preventivo" (valori: SI o vuoto)
                 const preventivo = row['Invio preventivo'] || '';
-                // Colonna B = "Data inizio" per istogramma
-                const dataChiamata = row['Data inizio'] || row['Data'] || '';
+                // Colonna D = "Data chiamata" per istogramma
+                const dataChiamata = row['Data chiamata'] || row['Data inizio'] || row['Data'] || '';
                 
                 // LIVELLO 1: Solo AI vs Operatore (niente Tool Error)
                 let livello1;
@@ -543,14 +557,20 @@
                 
                 let livello3 = hasPreventivo ? 'Preventivo inviato' : 'Nessuna conversione';
                 
-                // Estrai data per istogramma (formato DD/MM/YYYY)
+                // Estrai data per istogramma
                 let dateKey = 'Sconosciuta';
                 if (dataChiamata) {
-                    if (dataChiamata.includes('/')) {
-                        dateKey = dataChiamata.split(' ')[0]; // Prendi solo la data, non l'ora
-                    } else if (dataChiamata.includes('-')) {
-                        const parts = dataChiamata.split('T')[0].split('-');
-                        dateKey = `${parts[2]}/${parts[1]}/${parts[0]}`;
+                    const dateStr = dataChiamata.toString().trim();
+                    if (dateStr.includes('-')) {
+                        // Formato YYYY-MM-DD HH:MM → converti a DD/MM/YYYY
+                        const datePart = dateStr.split(' ')[0];
+                        const parts = datePart.split('-');
+                        if (parts.length === 3) {
+                            dateKey = `${parts[2]}/${parts[1]}/${parts[0]}`;
+                        }
+                    } else if (dateStr.includes('/')) {
+                        // Formato DD/MM/YYYY HH:MM:SS - prendi solo DD/MM/YYYY
+                        dateKey = dateStr.split(' ')[0];
                     }
                 }
                 
@@ -684,21 +704,34 @@
             
             // ISTOGRAMMA CHIAMATE GIORNALIERE
             const dailyCounts = {};
-            processedData.forEach(row => {
+            processedData.forEach((row, idx) => {
                 const d = row.dateKey;
+                if (idx < 3) console.log('Date key sample:', d);
                 if (d && d !== 'Sconosciuta') {
                     dailyCounts[d] = (dailyCounts[d] || 0) + 1;
                 }
             });
             
+            console.log('Daily counts:', dailyCounts);
+            console.log('Number of days:', Object.keys(dailyCounts).length);
+            
+            // Se non ci sono dati, mostra messaggio
+            if (Object.keys(dailyCounts).length === 0) {
+                document.getElementById('daily_chart').innerHTML = '<div class="error-msg">Nessun dato giornaliero disponibile</div>';
+                return;
+            }
+            
             // Ordina per data
             const sortedDays = Object.entries(dailyCounts).sort((a, b) => {
                 const partsA = a[0].split('/');
                 const partsB = b[0].split('/');
-                const dateA = new Date(partsA[2], partsA[1] - 1, partsA[0]);
-                const dateB = new Date(partsB[2], partsB[1] - 1, partsB[0]);
+                if (partsA.length !== 3 || partsB.length !== 3) return 0;
+                const dateA = new Date(partsA[2], parseInt(partsA[1]) - 1, parseInt(partsA[0]));
+                const dateB = new Date(partsB[2], parseInt(partsB[1]) - 1, parseInt(partsB[0]));
                 return dateA - dateB;
             });
+            
+            console.log('Sorted days:', sortedDays);
             
             // Crea dati per il grafico
             const dailyChartData = new google.visualization.DataTable();
