@@ -73,9 +73,9 @@
             background: linear-gradient(135deg, rgba(251,191,36,0.08) 0%, rgba(245,158,11,0.08) 100%);
             border-color: rgba(251,191,36,0.2);
         }
-        .stat-card.danger {
-            background: linear-gradient(135deg, rgba(239,68,68,0.08) 0%, rgba(220,38,38,0.08) 100%);
-            border-color: rgba(239,68,68,0.2);
+        .stat-card.info {
+            background: linear-gradient(135deg, rgba(6,182,212,0.08) 0%, rgba(59,130,246,0.08) 100%);
+            border-color: rgba(6,182,212,0.2);
         }
         .stat-label {
             font-size: 0.85rem;
@@ -97,7 +97,7 @@
         }
         .stat-card.success .stat-value { color: #64ffda; }
         .stat-card.warning .stat-value { color: #fbbf24; }
-        .stat-card.danger .stat-value { color: #ef4444; }
+        .stat-card.info .stat-value { color: #06b6d4; }
         .stat-percentage { font-size: 1rem; color: #8892b0; margin-top: 4px; }
         .chart-container {
             background: rgba(255,255,255,0.03);
@@ -112,7 +112,7 @@
             margin-bottom: 20px;
             color: #e6f1ff;
         }
-        #sankey_chart { width: 100%; height: 500px; }
+        #sankey_chart { width: 100%; height: 600px; }
         .loading {
             display: flex;
             align-items: center;
@@ -210,15 +210,15 @@
                 <div class="stat-value" id="operatorHandled">--</div>
                 <div class="stat-percentage" id="operatorPerc">--</div>
             </div>
-            <div class="stat-card danger">
-                <div class="stat-label">Tool Error</div>
-                <div class="stat-value" id="toolError">--</div>
-                <div class="stat-percentage" id="errorPerc">--</div>
+            <div class="stat-card info">
+                <div class="stat-label">Conversioni (Email + Preventivi)</div>
+                <div class="stat-value" id="conversions">--</div>
+                <div class="stat-percentage" id="convPerc">--</div>
             </div>
         </div>
         
         <div class="chart-container">
-            <div class="chart-title">Diagramma Alluvionale - Flusso Chiamate</div>
+            <div class="chart-title">Diagramma Alluvionale - Flusso Chiamate (3 Livelli)</div>
             <div id="sankey_chart">
                 <div class="loading">
                     <div class="loading-spinner"></div>
@@ -228,7 +228,7 @@
         </div>
         
         <div class="chart-container">
-            <div class="chart-title">Dettaglio Motivi - Chiamate Gestite da AI</div>
+            <div class="chart-title">Dettaglio Topic - Chiamate Gestite da AI</div>
             <div class="legend-grid" id="legendGrid"></div>
         </div>
     </div>
@@ -237,7 +237,7 @@
         google.charts.load('current', {'packages':['sankey']});
         google.charts.setOnLoadCallback(loadData);
         
-        // Google Sheet CSV URL - IMPORTANTE: deve essere pubblicato su web
+        // Google Sheet CSV URL
         const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vT1J6kQswwzL9zmj7y_lis4jvKGUYRTyFfjZGXVfL22l-JEHDYUeC2aapUVzObvFhhJu8be7hdcIhKN/pub?gid=0&single=true&output=csv';
         
         function loadData() {
@@ -254,6 +254,7 @@
                 complete: function(results) {
                     console.log('Data loaded:', results.data.length, 'rows');
                     console.log('Headers:', results.meta.fields);
+                    console.log('Sample row:', results.data[0]);
                     processData(results.data);
                     
                     document.getElementById('updateTime').textContent = 
@@ -280,7 +281,7 @@
         
         function processData(rows) {
             // Filtra righe vuote
-            const data = rows.filter(row => row['Agente'] || row['Livello 1']);
+            const data = rows.filter(row => row['Agente'] || row['Livello 1'] || row['Motivo chiamata']);
             
             if (data.length === 0) {
                 document.getElementById('sankey_chart').innerHTML = `
@@ -289,87 +290,126 @@
                 return;
             }
             
-            // Controlla se esistono le colonne Livello 1 e Livello 2
-            const hasLevels = data[0].hasOwnProperty('Livello 1') && data[0].hasOwnProperty('Livello 2');
-            
-            let processedData;
-            if (hasLevels) {
-                processedData = data.map(row => ({
-                    livello1: row['Livello 1'] || 'Non classificato',
-                    livello2: row['Livello 2'] || 'Non classificato'
-                }));
-            } else {
-                // Calcola i livelli dai dati raw
-                processedData = data.map(row => {
-                    const passaggioOp = row['Orario passaggio operatore'] || row['Passaggio a operatore'];
-                    const toolsError = row['Tools Error'];
-                    const motivo = row['Motivo chiamata'] || 'Non identificato';
-                    
-                    let livello1, livello2;
-                    
-                    if (passaggioOp && passaggioOp !== '' && passaggioOp !== 'NO') {
-                        livello1 = 'Passaggio Operatore';
-                        livello2 = '→ Operatore';
-                    } else if (toolsError && toolsError !== '') {
-                        livello1 = 'Tool Error';
-                        livello2 = '→ Error';
-                    } else {
-                        livello1 = 'Gestito da AI';
-                        livello2 = motivo;
-                    }
-                    
-                    return { livello1, livello2 };
-                });
-            }
-            
-            // Conta per livello
-            const level1Counts = {};
-            const flowCounts = {};
-            const aiMotivi = {};
-            
-            processedData.forEach(row => {
-                const l1 = row.livello1;
-                const l2 = row.livello2;
-                
-                level1Counts[l1] = (level1Counts[l1] || 0) + 1;
-                
-                const flowKey = `${l1}|||${l2}`;
-                flowCounts[flowKey] = (flowCounts[flowKey] || 0) + 1;
-                
-                if (l1 === 'Gestito da AI') {
-                    aiMotivi[l2] = (aiMotivi[l2] || 0) + 1;
-                }
+            // Log per debug
+            console.log('Sample data for classification:', {
+                'Orario passaggio operatore': data[0]['Orario passaggio operatore'],
+                'Motivo chiamata': data[0]['Motivo chiamata'],
+                'Preventivo': data[0]['Preventivo'],
+                'Email creata': data[0]['Email creata']
             });
             
-            const total = processedData.length;
-            const aiCount = level1Counts['Gestito da AI'] || 0;
-            const operatorCount = level1Counts['Passaggio Operatore'] || 0;
-            const errorCount = level1Counts['Tool Error'] || 0;
+            // Processa ogni riga - 3 LIVELLI senza Tool Error
+            const processedData = data.map(row => {
+                // Colonna K = "Orario passaggio operatore"
+                const passaggioOp = row['Orario passaggio operatore'] || '';
+                // Colonna G = "Motivo chiamata"
+                const motivo = row['Motivo chiamata'] || 'Non identificato';
+                // Colonna O = "Preventivo"
+                const preventivo = row['Preventivo'] || '';
+                // Colonna P = "Email creata"
+                const emailCreata = row['Email creata'] || '';
+                
+                // LIVELLO 1: Solo AI vs Operatore (niente Tool Error)
+                let livello1;
+                if (passaggioOp && passaggioOp.trim() !== '' && passaggioOp.toUpperCase() !== 'NO') {
+                    livello1 = 'Passaggio Operatore';
+                } else {
+                    livello1 = 'Gestito da AI';
+                }
+                
+                // LIVELLO 2: Topic/Motivo
+                let livello2 = motivo.trim() || 'Non identificato';
+                // Normalizza alcuni valori
+                if (livello2.toLowerCase() === 'out of scope' || livello2.toLowerCase() === 'outofscope') {
+                    livello2 = 'Out of scope';
+                }
+                
+                // LIVELLO 3: Conversione
+                let livello3 = 'Nessuna conversione';
+                const hasPreventivo = preventivo && preventivo.trim() !== '' && 
+                    preventivo.toUpperCase() !== 'NO' && preventivo.toUpperCase() !== 'FALSE';
+                const hasEmail = emailCreata && emailCreata.trim() !== '' && 
+                    emailCreata.toUpperCase() !== 'NO' && emailCreata.toUpperCase() !== 'FALSE';
+                
+                if (hasPreventivo && hasEmail) {
+                    livello3 = 'Email + Preventivo';
+                } else if (hasPreventivo) {
+                    livello3 = 'Preventivo inviato';
+                } else if (hasEmail) {
+                    livello3 = 'Email creata';
+                }
+                
+                return { livello1, livello2, livello3, hasPreventivo, hasEmail };
+            });
             
-            // Aggiorna statistiche
+            // Conta statistiche
+            const total = processedData.length;
+            const aiCount = processedData.filter(r => r.livello1 === 'Gestito da AI').length;
+            const operatorCount = processedData.filter(r => r.livello1 === 'Passaggio Operatore').length;
+            const conversions = processedData.filter(r => r.hasPreventivo || r.hasEmail).length;
+            
+            // Aggiorna statistiche cards
             document.getElementById('totalCalls').textContent = total.toLocaleString('it-IT');
             document.getElementById('aiHandled').textContent = aiCount.toLocaleString('it-IT');
             document.getElementById('aiPerc').textContent = `${((aiCount/total)*100).toFixed(1)}% del totale`;
             document.getElementById('operatorHandled').textContent = operatorCount.toLocaleString('it-IT');
             document.getElementById('operatorPerc').textContent = `${((operatorCount/total)*100).toFixed(1)}% del totale`;
-            document.getElementById('toolError').textContent = errorCount.toLocaleString('it-IT');
-            document.getElementById('errorPerc').textContent = `${((errorCount/total)*100).toFixed(1)}% del totale`;
+            document.getElementById('conversions').textContent = conversions.toLocaleString('it-IT');
+            document.getElementById('convPerc').textContent = `${((conversions/total)*100).toFixed(1)}% del totale`;
+            
+            // Conta flussi per Sankey - 3 LIVELLI
+            // Struttura Zeno: Totale → Operatore SI/NO → (solo per NO) Topic → Conversione
+            const flow1to2 = {}; // Totale → Operatore SI / Gestito AI
+            const flow2to3 = {}; // Gestito AI → Topic
+            const flow3to4 = {}; // Topic → Conversione
+            const topicCounts = {};
+            
+            processedData.forEach(row => {
+                const l1 = row.livello1;
+                const l2 = row.livello2;
+                const l3 = row.livello3;
+                
+                // Flusso 1: Totale → Passaggio Operatore / Gestito da AI
+                flow1to2[l1] = (flow1to2[l1] || 0) + 1;
+                
+                // Flusso 2: SOLO Gestito da AI → Topic (Passaggio Operatore non si espande)
+                if (l1 === 'Gestito da AI') {
+                    const key2 = `${l1}|||${l2}`;
+                    flow2to3[key2] = (flow2to3[key2] || 0) + 1;
+                    topicCounts[l2] = (topicCounts[l2] || 0) + 1;
+                    
+                    // Flusso 3: Topic → Conversione
+                    const key3 = `${l2}|||${l3}`;
+                    flow3to4[key3] = (flow3to4[key3] || 0) + 1;
+                }
+            });
             
             // Costruisci dati Sankey
             const sankeyRows = [];
             
-            // Flussi Livello 1
-            Object.entries(level1Counts).forEach(([level, count]) => {
+            // Livello 1: Totale Chiamate → Passaggio Operatore / Gestito da AI
+            Object.entries(flow1to2).forEach(([level, count]) => {
                 sankeyRows.push(['Totale Chiamate', level, count]);
             });
             
-            // Flussi Livello 2 (solo per Gestito da AI per evitare cicli)
-            Object.entries(flowCounts).forEach(([key, count]) => {
+            // Livello 2: SOLO Gestito da AI → Topic (Passaggio Operatore resta nodo finale)
+            Object.entries(flow2to3).forEach(([key, count]) => {
                 const [from, to] = key.split('|||');
-                if (from === 'Gestito da AI' && to !== from && !to.startsWith('→')) {
+                if (count > 5) { // Mostra solo topic con almeno 5 chiamate
                     sankeyRows.push([from, to, count]);
                 }
             });
+            
+            // Livello 3: Topic → Conversione (solo se c'è conversione)
+            Object.entries(flow3to4).forEach(([key, count]) => {
+                const [from, to] = key.split('|||');
+                if (to !== 'Nessuna conversione' && count > 0) {
+                    // Usa prefisso → per evitare cicli con nomi uguali
+                    sankeyRows.push([from, `→ ${to}`, count]);
+                }
+            });
+            
+            console.log('Sankey rows:', sankeyRows);
             
             // Disegna Sankey
             const sankeyData = new google.visualization.DataTable();
@@ -383,40 +423,41 @@
                     node: {
                         label: {
                             fontName: 'Plus Jakarta Sans',
-                            fontSize: 13,
+                            fontSize: 12,
                             color: '#ffffff',
                             bold: true
                         },
-                        nodePadding: 40,
-                        width: 20,
-                        colors: ['#667eea', '#64ffda', '#fbbf24', '#ef4444', '#10b981', '#8b5cf6', '#ec4899', '#f97316', '#06b6d4', '#84cc16', '#a855f7']
+                        nodePadding: 30,
+                        width: 15,
+                        colors: ['#667eea', '#64ffda', '#fbbf24', '#10b981', '#8b5cf6', '#ec4899', '#f97316', '#06b6d4', '#84cc16', '#a855f7', '#14b8a6', '#f43f5e', '#eab308', '#22c55e', '#3b82f6']
                     },
                     link: {
                         colorMode: 'gradient'
                     }
                 },
-                backgroundColor: 'transparent'
+                backgroundColor: 'transparent',
+                tooltip: { isHtml: true }
             };
             
             const chart = new google.visualization.Sankey(document.getElementById('sankey_chart'));
             chart.draw(sankeyData, options);
             
-            // Costruisci legenda
+            // Costruisci legenda Topic
             const legendGrid = document.getElementById('legendGrid');
             legendGrid.innerHTML = '';
             
-            const colorPalette = ['#64ffda', '#10b981', '#8b5cf6', '#ec4899', '#f97316', '#06b6d4', '#84cc16', '#a855f7', '#78716c', '#6b7280', '#fbbf24', '#ef4444'];
+            const colorPalette = ['#64ffda', '#10b981', '#8b5cf6', '#ec4899', '#f97316', '#06b6d4', '#84cc16', '#a855f7', '#14b8a6', '#f43f5e', '#eab308', '#22c55e'];
             let colorIndex = 0;
             
-            const sortedMotivi = Object.entries(aiMotivi).sort((a, b) => b[1] - a[1]);
+            const sortedTopics = Object.entries(topicCounts).sort((a, b) => b[1] - a[1]);
             
-            sortedMotivi.forEach(([motivo, count]) => {
+            sortedTopics.forEach(([topic, count]) => {
                 const perc = ((count / aiCount) * 100).toFixed(1);
                 const item = document.createElement('div');
                 item.className = 'legend-item';
                 item.innerHTML = `
                     <div class="legend-color" style="background: ${colorPalette[colorIndex % colorPalette.length]}"></div>
-                    <div class="legend-text">${motivo}</div>
+                    <div class="legend-text">${topic}</div>
                     <div class="legend-count">${count} (${perc}%)</div>
                 `;
                 legendGrid.appendChild(item);
