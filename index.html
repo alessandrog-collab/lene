@@ -163,6 +163,27 @@
             transform: translateY(-2px);
             box-shadow: 0 10px 30px rgba(102,126,234,0.3);
         }
+        .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .filter-group label {
+            color: #8892b0;
+            font-size: 0.85rem;
+        }
+        .date-input {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 8px;
+            padding: 8px 12px;
+            color: #fff;
+            font-family: inherit;
+            font-size: 0.85rem;
+        }
+        .date-input::-webkit-calendar-picker-indicator {
+            filter: invert(1);
+        }
         .error-msg {
             background: rgba(239,68,68,0.1);
             border: 1px solid rgba(239,68,68,0.3);
@@ -187,11 +208,19 @@
                 <h1>Flusso Chiamate</h1>
                 <p>Analisi real-time delle chiamate gestite dal Voice Agent</p>
             </div>
-            <div style="display: flex; align-items: center; gap: 15px;">
+            <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
+                <div class="filter-group">
+                    <label>Da:</label>
+                    <input type="date" id="dateFrom" class="date-input">
+                </div>
+                <div class="filter-group">
+                    <label>A:</label>
+                    <input type="date" id="dateTo" class="date-input">
+                </div>
+                <button class="refresh-btn" onclick="loadData()">↻ Aggiorna</button>
                 <div class="last-update">
                     Ultimo aggiornamento: <span id="updateTime">--</span>
                 </div>
-                <button class="refresh-btn" onclick="loadData()">↻ Aggiorna</button>
             </div>
         </div>
         
@@ -211,7 +240,7 @@
                 <div class="stat-percentage" id="operatorPerc">--</div>
             </div>
             <div class="stat-card info">
-                <div class="stat-label">Conversioni (Email + Preventivi)</div>
+                <div class="stat-label">Preventivi Inviati</div>
                 <div class="stat-value" id="conversions">--</div>
                 <div class="stat-percentage" id="convPerc">--</div>
             </div>
@@ -281,7 +310,7 @@
         
         function processData(rows) {
             // Filtra righe vuote
-            const data = rows.filter(row => row['Agente'] || row['Livello 1'] || row['Motivo chiamata']);
+            let data = rows.filter(row => row['Agente'] || row['Livello 1'] || row['Motivo chiamata']);
             
             if (data.length === 0) {
                 document.getElementById('sankey_chart').innerHTML = `
@@ -290,12 +319,68 @@
                 return;
             }
             
+            // FILTRO 1: Solo "Agente Leads" nella colonna A (Agente)
+            data = data.filter(row => {
+                const agente = (row['Agente'] || '').trim().toLowerCase();
+                return agente === 'agente leads';
+            });
+            
+            // FILTRO 2: Date range
+            const dateFrom = document.getElementById('dateFrom').value;
+            const dateTo = document.getElementById('dateTo').value;
+            
+            if (dateFrom || dateTo) {
+                data = data.filter(row => {
+                    // Colonna B = "Data inizio" o simile
+                    const dataChiamata = row['Data inizio'] || row['Data'] || row['Timestamp'] || '';
+                    if (!dataChiamata) return true;
+                    
+                    // Prova a parsare la data (formato DD/MM/YYYY o YYYY-MM-DD)
+                    let rowDate;
+                    if (dataChiamata.includes('/')) {
+                        const parts = dataChiamata.split(' ')[0].split('/');
+                        if (parts.length === 3) {
+                            rowDate = new Date(parts[2], parts[1] - 1, parts[0]);
+                        }
+                    } else {
+                        rowDate = new Date(dataChiamata);
+                    }
+                    
+                    if (isNaN(rowDate)) return true;
+                    
+                    const fromDate = dateFrom ? new Date(dateFrom) : null;
+                    const toDate = dateTo ? new Date(dateTo) : null;
+                    
+                    if (fromDate && rowDate < fromDate) return false;
+                    if (toDate && rowDate > toDate) return false;
+                    return true;
+                });
+            }
+            
+            if (data.length === 0) {
+                document.getElementById('sankey_chart').innerHTML = `
+                    <div class="error-msg">Nessun dato trovato con i filtri selezionati.<br>Verifica il range di date o che esistano righe con "Agente Leads".</div>
+                `;
+                // Reset stats
+                document.getElementById('totalCalls').textContent = '0';
+                document.getElementById('aiHandled').textContent = '0';
+                document.getElementById('aiPerc').textContent = '0% del totale';
+                document.getElementById('operatorHandled').textContent = '0';
+                document.getElementById('operatorPerc').textContent = '0% del totale';
+                document.getElementById('conversions').textContent = '0';
+                document.getElementById('convPerc').textContent = '0% del totale';
+                document.getElementById('legendGrid').innerHTML = '';
+                return;
+            }
+            
             // Log per debug
+            console.log('Righe dopo filtri:', data.length);
             console.log('Sample data for classification:', {
+                'Agente': data[0]['Agente'],
+                'Data inizio': data[0]['Data inizio'],
                 'Orario passaggio operatore': data[0]['Orario passaggio operatore'],
                 'Motivo chiamata': data[0]['Motivo chiamata'],
-                'Preventivo': data[0]['Preventivo'],
-                'Email creata': data[0]['Email creata']
+                'Preventivo': data[0]['Preventivo']
             });
             
             // Processa ogni riga - 3 LIVELLI senza Tool Error
@@ -324,29 +409,20 @@
                     livello2 = 'Out of scope';
                 }
                 
-                // LIVELLO 3: Conversione
-                let livello3 = 'Nessuna conversione';
+                // LIVELLO 3: Conversione = SOLO Preventivo inviato (colonna O non vuota)
                 const hasPreventivo = preventivo && preventivo.trim() !== '' && 
                     preventivo.toUpperCase() !== 'NO' && preventivo.toUpperCase() !== 'FALSE';
-                const hasEmail = emailCreata && emailCreata.trim() !== '' && 
-                    emailCreata.toUpperCase() !== 'NO' && emailCreata.toUpperCase() !== 'FALSE';
                 
-                if (hasPreventivo && hasEmail) {
-                    livello3 = 'Email + Preventivo';
-                } else if (hasPreventivo) {
-                    livello3 = 'Preventivo inviato';
-                } else if (hasEmail) {
-                    livello3 = 'Email creata';
-                }
+                let livello3 = hasPreventivo ? 'Preventivo inviato' : 'Nessuna conversione';
                 
-                return { livello1, livello2, livello3, hasPreventivo, hasEmail };
+                return { livello1, livello2, livello3, hasPreventivo };
             });
             
             // Conta statistiche
             const total = processedData.length;
             const aiCount = processedData.filter(r => r.livello1 === 'Gestito da AI').length;
             const operatorCount = processedData.filter(r => r.livello1 === 'Passaggio Operatore').length;
-            const conversions = processedData.filter(r => r.hasPreventivo || r.hasEmail).length;
+            const conversions = processedData.filter(r => r.hasPreventivo).length;
             
             // Aggiorna statistiche cards
             document.getElementById('totalCalls').textContent = total.toLocaleString('it-IT');
@@ -358,10 +434,10 @@
             document.getElementById('convPerc').textContent = `${((conversions/total)*100).toFixed(1)}% del totale`;
             
             // Conta flussi per Sankey - 3 LIVELLI
-            // Struttura Zeno: Totale → Operatore SI/NO → (solo per NO) Topic → Conversione
+            // Struttura Zeno: Totale → Operatore SI/NO → Topic (per entrambi) → Conversione (solo AI)
             const flow1to2 = {}; // Totale → Operatore SI / Gestito AI
-            const flow2to3 = {}; // Gestito AI → Topic
-            const flow3to4 = {}; // Topic → Conversione
+            const flow2to3 = {}; // Operatore/AI → Topic
+            const flow3to4 = {}; // Topic (solo AI) → Conversione
             const topicCounts = {};
             
             processedData.forEach(row => {
@@ -372,13 +448,15 @@
                 // Flusso 1: Totale → Passaggio Operatore / Gestito da AI
                 flow1to2[l1] = (flow1to2[l1] || 0) + 1;
                 
-                // Flusso 2: SOLO Gestito da AI → Topic (Passaggio Operatore non si espande)
+                // Flusso 2: ENTRAMBI (Operatore e AI) → Topic
+                const key2 = `${l1}|||${l2}`;
+                flow2to3[key2] = (flow2to3[key2] || 0) + 1;
+                
+                // Conta topic solo per AI (per la legenda)
                 if (l1 === 'Gestito da AI') {
-                    const key2 = `${l1}|||${l2}`;
-                    flow2to3[key2] = (flow2to3[key2] || 0) + 1;
                     topicCounts[l2] = (topicCounts[l2] || 0) + 1;
                     
-                    // Flusso 3: Topic → Conversione
+                    // Flusso 3: Topic → Conversione (SOLO per Gestito da AI)
                     const key3 = `${l2}|||${l3}`;
                     flow3to4[key3] = (flow3to4[key3] || 0) + 1;
                 }
@@ -392,19 +470,20 @@
                 sankeyRows.push(['Totale Chiamate', level, count]);
             });
             
-            // Livello 2: SOLO Gestito da AI → Topic (Passaggio Operatore resta nodo finale)
+            // Livello 2: Operatore/AI → Topic (per ENTRAMBI)
             Object.entries(flow2to3).forEach(([key, count]) => {
                 const [from, to] = key.split('|||');
+                // Usa prefisso per distinguere topic di Operatore da quelli di AI
+                const prefix = from === 'Passaggio Operatore' ? '🔴 ' : '';
                 if (count > 5) { // Mostra solo topic con almeno 5 chiamate
-                    sankeyRows.push([from, to, count]);
+                    sankeyRows.push([from, `${prefix}${to}`, count]);
                 }
             });
             
-            // Livello 3: Topic → Conversione (solo se c'è conversione)
+            // Livello 3: Topic → Conversione (SOLO per Gestito da AI con preventivo)
             Object.entries(flow3to4).forEach(([key, count]) => {
                 const [from, to] = key.split('|||');
                 if (to !== 'Nessuna conversione' && count > 0) {
-                    // Usa prefisso → per evitare cicli con nomi uguali
                     sankeyRows.push([from, `→ ${to}`, count]);
                 }
             });
