@@ -199,10 +199,92 @@
             color: #8892b0;
             word-break: break-all;
         }
+        /* PASSWORD SCREEN */
+        .password-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 50%, #16213e 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+        }
+        .password-box {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 20px;
+            padding: 40px;
+            text-align: center;
+            max-width: 400px;
+            width: 90%;
+        }
+        .password-box h2 {
+            font-size: 1.5rem;
+            margin-bottom: 10px;
+            color: #e6f1ff;
+        }
+        .password-box p {
+            color: #8892b0;
+            margin-bottom: 25px;
+            font-size: 0.95rem;
+        }
+        .password-input {
+            width: 100%;
+            padding: 14px 18px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 10px;
+            color: #fff;
+            font-size: 1rem;
+            font-family: inherit;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+        .password-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        .password-btn {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            border-radius: 10px;
+            color: #fff;
+            font-size: 1rem;
+            font-weight: 600;
+            font-family: inherit;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .password-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(102,126,234,0.3);
+        }
+        .password-error {
+            color: #ef4444;
+            margin-top: 15px;
+            font-size: 0.9rem;
+        }
     </style>
 </head>
 <body>
-    <div class="container">
+    <!-- PASSWORD SCREEN -->
+    <div id="passwordScreen" class="password-screen">
+        <div class="password-box">
+            <h2>🔒 Accesso Riservato</h2>
+            <p>Inserisci la password per accedere alla dashboard</p>
+            <input type="password" id="passwordInput" class="password-input" placeholder="Password" onkeypress="if(event.key==='Enter') checkPasswordAndSave()">
+            <button class="password-btn" onclick="checkPasswordAndSave()">Accedi</button>
+            <div id="passwordError" class="password-error"></div>
+        </div>
+    </div>
+
+    <!-- MAIN CONTENT (hidden initially) -->
+    <div id="mainContent" class="container" style="display: none;">
         <div class="header">
             <div class="title-section">
                 <h1>Flusso Chiamate</h1>
@@ -263,8 +345,47 @@
     </div>
 
     <script>
+        // PASSWORD CHECK
+        const CORRECT_PASSWORD = 'lene2026';
+        
+        function checkPassword() {
+            const input = document.getElementById('passwordInput').value;
+            if (input === CORRECT_PASSWORD) {
+                document.getElementById('passwordScreen').style.display = 'none';
+                document.getElementById('mainContent').style.display = 'block';
+                loadData();
+            } else {
+                document.getElementById('passwordError').textContent = 'Password errata. Riprova.';
+                document.getElementById('passwordInput').value = '';
+            }
+        }
+        
+        // Check if already authenticated (session)
+        if (sessionStorage.getItem('lene_auth') === 'true') {
+            document.getElementById('passwordScreen').style.display = 'none';
+            document.getElementById('mainContent').style.display = 'block';
+        }
+        
+        function checkPasswordAndSave() {
+            const input = document.getElementById('passwordInput').value;
+            if (input === CORRECT_PASSWORD) {
+                sessionStorage.setItem('lene_auth', 'true');
+                document.getElementById('passwordScreen').style.display = 'none';
+                document.getElementById('mainContent').style.display = 'block';
+                loadData();
+            } else {
+                document.getElementById('passwordError').textContent = 'Password errata. Riprova.';
+                document.getElementById('passwordInput').value = '';
+            }
+        }
+
         google.charts.load('current', {'packages':['sankey']});
-        google.charts.setOnLoadCallback(loadData);
+        google.charts.setOnLoadCallback(function() {
+            // Solo se già autenticato
+            if (sessionStorage.getItem('lene_auth') === 'true') {
+                loadData();
+            }
+        });
         
         // Google Sheet CSV URL
         const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vT1J6kQswwzL9zmj7y_lis4jvKGUYRTyFfjZGXVfL22l-JEHDYUeC2aapUVzObvFhhJu8be7hdcIhKN/pub?gid=0&single=true&output=csv';
@@ -389,10 +510,8 @@
                 const passaggioOp = row['Orario passaggio operatore'] || '';
                 // Colonna G = "Motivo chiamata"
                 const motivo = row['Motivo chiamata'] || 'Non identificato';
-                // Colonna O = "Preventivo"
-                const preventivo = row['Preventivo'] || '';
-                // Colonna P = "Email creata"
-                const emailCreata = row['Email creata'] || '';
+                // Colonna O = "Invio preventivo" (valori: SI o vuoto)
+                const preventivo = row['Invio preventivo'] || '';
                 
                 // LIVELLO 1: Solo AI vs Operatore (niente Tool Error)
                 let livello1;
@@ -409,9 +528,8 @@
                     livello2 = 'Out of scope';
                 }
                 
-                // LIVELLO 3: Conversione = SOLO Preventivo inviato (colonna O non vuota)
-                const hasPreventivo = preventivo && preventivo.trim() !== '' && 
-                    preventivo.toUpperCase() !== 'NO' && preventivo.toUpperCase() !== 'FALSE';
+                // LIVELLO 3: Conversione = "Invio preventivo" = "SI"
+                const hasPreventivo = preventivo && preventivo.trim().toUpperCase() === 'SI';
                 
                 let livello3 = hasPreventivo ? 'Preventivo inviato' : 'Nessuna conversione';
                 
