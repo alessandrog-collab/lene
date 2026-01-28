@@ -386,6 +386,11 @@
 
         google.charts.load('current', {'packages':['sankey', 'corechart']});
         google.charts.setOnLoadCallback(function() {
+            // Pre-imposta filtro data con oggi
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('dateFrom').value = today;
+            document.getElementById('dateTo').value = today;
+            
             // Solo se già autenticato
             if (sessionStorage.getItem('lene_auth') === 'true') {
                 loadData();
@@ -702,53 +707,70 @@
                 colorIndex++;
             });
             
-            // ISTOGRAMMA CHIAMATE GIORNALIERE
-            const dailyCounts = {};
-            processedData.forEach((row, idx) => {
+            // ISTOGRAMMA CHIAMATE GIORNALIERE PER TOPIC
+            // Raccogli tutti i topic unici
+            const allTopics = new Set();
+            const dailyByTopic = {};
+            
+            processedData.forEach((row) => {
                 const d = row.dateKey;
-                if (idx < 3) console.log('Date key sample:', d);
+                const topic = row.livello2;
+                
                 if (d && d !== 'Sconosciuta') {
-                    dailyCounts[d] = (dailyCounts[d] || 0) + 1;
+                    allTopics.add(topic);
+                    if (!dailyByTopic[d]) dailyByTopic[d] = {};
+                    dailyByTopic[d][topic] = (dailyByTopic[d][topic] || 0) + 1;
                 }
             });
             
-            console.log('Daily counts:', dailyCounts);
-            console.log('Number of days:', Object.keys(dailyCounts).length);
+            const topicsArray = Array.from(allTopics);
+            console.log('Topics found:', topicsArray);
+            console.log('Daily by topic:', dailyByTopic);
             
             // Se non ci sono dati, mostra messaggio
-            if (Object.keys(dailyCounts).length === 0) {
+            if (Object.keys(dailyByTopic).length === 0) {
                 document.getElementById('daily_chart').innerHTML = '<div class="error-msg">Nessun dato giornaliero disponibile</div>';
                 return;
             }
             
             // Ordina per data
-            const sortedDays = Object.entries(dailyCounts).sort((a, b) => {
-                const partsA = a[0].split('/');
-                const partsB = b[0].split('/');
+            const sortedDays = Object.keys(dailyByTopic).sort((a, b) => {
+                const partsA = a.split('/');
+                const partsB = b.split('/');
                 if (partsA.length !== 3 || partsB.length !== 3) return 0;
                 const dateA = new Date(partsA[2], parseInt(partsA[1]) - 1, parseInt(partsA[0]));
                 const dateB = new Date(partsB[2], parseInt(partsB[1]) - 1, parseInt(partsB[0]));
                 return dateA - dateB;
             });
             
-            console.log('Sorted days:', sortedDays);
-            
-            // Crea dati per il grafico
+            // Crea dati per il grafico stacked
             const dailyChartData = new google.visualization.DataTable();
             dailyChartData.addColumn('string', 'Data');
-            dailyChartData.addColumn('number', 'Chiamate');
-            dailyChartData.addColumn({type: 'string', role: 'style'});
             
-            sortedDays.forEach(([date, count]) => {
-                dailyChartData.addRow([date, count, '#667eea']);
+            // Aggiungi una colonna per ogni topic
+            topicsArray.forEach(topic => {
+                dailyChartData.addColumn('number', topic);
+            });
+            
+            // Aggiungi le righe
+            sortedDays.forEach(date => {
+                const row = [date];
+                topicsArray.forEach(topic => {
+                    row.push(dailyByTopic[date][topic] || 0);
+                });
+                dailyChartData.addRow(row);
             });
             
             const dailyOptions = {
                 backgroundColor: 'transparent',
-                legend: { position: 'none' },
-                chartArea: { width: '90%', height: '75%' },
+                legend: { 
+                    position: 'top',
+                    maxLines: 3,
+                    textStyle: { color: '#8892b0', fontSize: 11 }
+                },
+                chartArea: { width: '85%', height: '65%' },
                 hAxis: {
-                    textStyle: { color: '#8892b0', fontSize: 11 },
+                    textStyle: { color: '#8892b0', fontSize: 10 },
                     slantedText: true,
                     slantedTextAngle: 45
                 },
@@ -757,8 +779,9 @@
                     gridlines: { color: 'rgba(255,255,255,0.05)' },
                     minValue: 0
                 },
-                bar: { groupWidth: '70%' },
-                colors: ['#667eea']
+                bar: { groupWidth: '75%' },
+                isStacked: true,
+                colors: ['#667eea', '#64ffda', '#fbbf24', '#10b981', '#8b5cf6', '#ec4899', '#f97316', '#06b6d4', '#84cc16', '#a855f7', '#14b8a6', '#f43f5e', '#eab308', '#22c55e']
             };
             
             const dailyChart = new google.visualization.ColumnChart(document.getElementById('daily_chart'));
