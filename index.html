@@ -339,7 +339,7 @@
         </div>
         
         <div class="chart-container">
-            <div class="chart-title">Dettaglio Topic - Chiamate Gestite da AI</div>
+            <div class="chart-title">Dettaglio Topic - Tutte le Chiamate</div>
             <div class="legend-grid" id="legendGrid"></div>
         </div>
         
@@ -616,11 +616,11 @@
                 const key2 = `${l1}|||${l2}`;
                 flow2to3[key2] = (flow2to3[key2] || 0) + 1;
                 
-                // Conta topic solo per AI (per la legenda)
+                // Conta topic per TUTTE le chiamate (non solo AI)
+                topicCounts[l2] = (topicCounts[l2] || 0) + 1;
+                
+                // Flusso 3: Topic → Conversione (SOLO per Gestito da AI)
                 if (l1 === 'Gestito da AI') {
-                    topicCounts[l2] = (topicCounts[l2] || 0) + 1;
-                    
-                    // Flusso 3: Topic → Conversione (SOLO per Gestito da AI)
                     const key3 = `${l2}|||${l3}`;
                     flow3to4[key3] = (flow3to4[key3] || 0) + 1;
                 }
@@ -695,7 +695,7 @@
             const sortedTopics = Object.entries(topicCounts).sort((a, b) => b[1] - a[1]);
             
             sortedTopics.forEach(([topic, count]) => {
-                const perc = ((count / aiCount) * 100).toFixed(1);
+                const perc = ((count / total) * 100).toFixed(1);
                 const item = document.createElement('div');
                 item.className = 'legend-item';
                 item.innerHTML = `
