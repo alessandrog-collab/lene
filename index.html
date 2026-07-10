@@ -527,7 +527,7 @@
                 <div id="operatorDelta"></div>
             </div>
             <div class="tile c-volt">
-                <div class="tile-label">Preventivi Inviati</div>
+                <div class="tile-label">Lead Inviabili</div>
                 <div class="tile-value" id="conversions">--</div>
                 <div class="tile-sub" id="convPerc">--</div>
                 <div id="convDelta"></div>
@@ -695,16 +695,25 @@
             const m = Math.floor(s / 60), sec = Math.round(s % 60);
             return `${m}:${String(sec).padStart(2, '0')}`;
         }
+        function isEmailValid(email) {
+            const e = (email || '').toString().trim().toLowerCase();
+            if (!e || e === 'n/a') return false;
+            const at = e.indexOf('@');
+            if (at < 1) return false;
+            const dominio = e.substring(at + 1);
+            return dominio.includes('.');
+        }
         function classifyRow(row) {
             const passaggioOp = row['Orario passaggio operatore'] || '';
             const motivo = (row['Motivo chiamata'] || 'Non identificato').toString();
-            const preventivo = (row['Invio preventivo'] || '').toString();
+            const consenso = (row['Consenso'] || '').toString().trim().toLowerCase();
 
             let livello1 = (passaggioOp && passaggioOp.trim() !== '' && passaggioOp.toUpperCase() !== 'NO')
                 ? 'Passaggio Operatore' : 'Gestito da AI';
             let livello2 = motivo.trim() || 'Non identificato';
             if (livello2.toLowerCase() === 'out of scope' || livello2.toLowerCase() === 'outofscope') livello2 = 'Out of scope';
-            const hasPreventivo = preventivo.trim().toUpperCase() === 'SI';
+            // Lead inviabile = ha acconsentito E ha un'email valida (stessa regola delle query SQL)
+            const hasPreventivo = (consenso === 'acconsente') && isEmailValid(row['Email']);
             const livello3 = hasPreventivo ? 'Preventivo inviato' : 'Nessuna conversione';
 
             const iso = rowDateISO(row);
@@ -816,7 +825,7 @@
                 const stages = [
                     { label: 'Chiamate ricevute', n: stats.total, cls: 'f1' },
                     { label: 'Gestite dall\'AI', n: stats.ai, cls: 'f2' },
-                    { label: 'Preventivi inviati', n: stats.conv, cls: 'f3' }
+                    { label: 'Lead inviabili (consenso + email)', n: stats.conv, cls: 'f3' }
                 ];
                 funnelBox.innerHTML = stages.map(s => {
                     const p = stats.total > 0 ? (s.n / stats.total) * 100 : 0;
