@@ -819,7 +819,8 @@
             const scores = rows.map(r => r.score).filter(v => !isNaN(v));
             const avgScore = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
             const lats = rows.map(r => r.latencyMs).filter(v => v !== null && v > 0).sort((a, b) => a - b);
-            return { total, ai, op: total - ai, conv, avgDur, avgScore, nScores: scores.length, latMedian: pctl(lats, 0.5), latP95: pctl(lats, 0.95), nLat: lats.length };
+            const latMean = lats.length ? Math.round(lats.reduce((a, b) => a + b, 0) / lats.length) : null;
+            return { total, ai, op: total - ai, conv, avgDur, avgScore, nScores: scores.length, latMedian: pctl(lats, 0.5), latMean: latMean, latP95: pctl(lats, 0.95), nLat: lats.length };
         }
         function animateValue(elId, target) {
             const el = document.getElementById(elId);
@@ -875,14 +876,16 @@
             const dt = new google.visualization.DataTable();
             dt.addColumn('string', 'Periodo');
             dt.addColumn('number', 'Mediana (s)');
+            dt.addColumn('number', 'Media (s)');
             dt.addColumn('number', 'Picco p95 (s)');
             keys.forEach(k => {
                 const arr = buckets[k].slice().sort((a, b) => a - b);
                 const med = Math.round(pctl(arr, 0.5) / 100) / 10;
+                const mean = Math.round((arr.reduce((a, b) => a + b, 0) / arr.length) / 100) / 10;
                 const p95 = Math.round(pctl(arr, 0.95) / 100) / 10;
                 let label = k;
                 if (gran !== 'mese') { const p = k.split('-'); label = p[2] + '/' + p[1]; }
-                dt.addRow([label, med, p95]);
+                dt.addRow([label, med, mean, p95]);
             });
             const opts = {
                 backgroundColor: 'transparent',
@@ -890,7 +893,7 @@
                 chartArea: { width: '86%', height: '66%' },
                 hAxis: { textStyle: { color: '#8a93a6', fontSize: 10, fontName: 'Manrope' }, slantedText: true, slantedTextAngle: 45, showTextEvery: Math.max(1, Math.ceil(keys.length / 31)) },
                 vAxis: { textStyle: { color: '#8a93a6', fontName: 'Manrope' }, gridlines: { color: 'rgba(255,255,255,0.05)' }, minValue: 0 },
-                colors: ['#c9f542', '#fb7185'],
+                colors: ['#c9f542', '#a8b5ff', '#fb7185'],
                 curveType: 'function',
                 lineWidth: 3,
                 pointSize: 4
@@ -990,7 +993,7 @@
             const latSub = document.getElementById('latencySub');
             if (hasLat && stats.latMedian !== null) {
                 latEl.textContent = (stats.latMedian / 1000).toFixed(1).replace('.', ',') + ' s';
-                latSub.textContent = 'picco p95 ' + (stats.latP95 / 1000).toFixed(1).replace('.', ',') + ' s · ' + stats.nLat.toLocaleString('it-IT') + ' chiamate';
+                latSub.textContent = 'media ' + (stats.latMean / 1000).toFixed(1).replace('.', ',') + ' s · p95 ' + (stats.latP95 / 1000).toFixed(1).replace('.', ',') + ' s · ' + stats.nLat.toLocaleString('it-IT') + ' chiamate';
             } else {
                 latEl.textContent = 'n/d';
                 latSub.textContent = hasLat ? 'nessun dato nel periodo' : 'dato in caricamento';
