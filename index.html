@@ -194,6 +194,7 @@
         .tile:nth-child(6) { animation-delay: 0.27s; }
         .tile:nth-child(7) { animation-delay: 0.32s; }
         .tile:nth-child(8) { animation-delay: 0.37s; }
+        .tile:nth-child(9) { animation-delay: 0.42s; }
         @keyframes rise {
             from { opacity: 0; transform: translateY(14px); }
             to { opacity: 1; transform: translateY(0); }
@@ -450,6 +451,34 @@
             .tile.hero, .tile.wide { grid-column: span 1; }
             .title-section h1 { font-size: 2rem; }
         }
+
+        /* ===== LATENZA + TOOLTIP LEGENDA ===== */
+        .tile.c-rose .tile-value { color: var(--rose); }
+        .tile.tip-host { overflow: visible; }
+        .tile.tip-host:hover, .tile.tip-host:focus-within { z-index: 40; }
+        .info-tip {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 16px; height: 16px; margin-left: 6px;
+            border-radius: 50%; border: 1px solid var(--line-strong);
+            color: var(--muted); font-size: 0.64rem; font-weight: 700;
+            cursor: help; position: relative; vertical-align: middle;
+            letter-spacing: 0; text-transform: none;
+        }
+        .info-tip:hover, .info-tip:focus { color: var(--text); border-color: var(--volt); outline: none; }
+        .info-tip::after {
+            content: attr(data-tip);
+            position: absolute; top: calc(100% + 9px); left: 50%;
+            transform: translateX(-50%);
+            width: 240px; max-width: 62vw;
+            background: #0f131c; border: 1px solid var(--line-strong);
+            border-radius: 10px; padding: 11px 13px;
+            font-size: 0.74rem; font-weight: 500; line-height: 1.45;
+            color: #cdd5e1; text-transform: none; letter-spacing: normal;
+            opacity: 0; visibility: hidden; transition: opacity 0.2s ease;
+            z-index: 60; pointer-events: none;
+            box-shadow: 0 14px 34px rgba(0,0,0,0.55);
+        }
+        .info-tip:hover::after, .info-tip:focus::after { opacity: 1; visibility: visible; }
     </style>
 </head>
 <body>
@@ -527,7 +556,9 @@
                 <div id="operatorDelta"></div>
             </div>
             <div class="tile c-volt">
-                <div class="tile-label">Lead Inviabili</div>
+                <div class="tile-label">Lead Inviabili
+                    <span class="info-tip" tabindex="0" data-tip="Chiamate in cui il cliente ha dato il consenso e ha lasciato un'email valida. Sono i contatti realmente utilizzabili per inviare l'offerta.">?</span>
+                </div>
                 <div class="tile-value" id="conversions">--</div>
                 <div class="tile-sub" id="convPerc">--</div>
                 <div id="convDelta"></div>
@@ -538,12 +569,21 @@
                 <div class="tile-sub" id="avgDurationSub">minuti : secondi</div>
                 <div id="durDelta"></div>
             </div>
+            <div class="tile c-rose tip-host">
+                <div class="tile-label">Latenza Tipica
+                    <span class="info-tip" tabindex="0" data-tip="Quanto tempo aspetta il cliente prima che Goffredo inizi a rispondere. Mostriamo il valore mediano, cioè l'esperienza più comune, e come picco il p95: nel 95 per cento dei casi la risposta arriva entro quel tempo. Non usiamo la media perché poche chiamate molto lente la falserebbero.">?</span>
+                </div>
+                <div class="tile-value" id="latencyValue">--</div>
+                <div class="tile-sub" id="latencySub">tempo di risposta</div>
+            </div>
             <div class="tile wide">
                 <div class="tile-label">Funnel di Conversione</div>
                 <div id="funnelBox"></div>
             </div>
             <div class="tile c-teal">
-                <div class="tile-label">Soddisfazione Media</div>
+                <div class="tile-label">Soddisfazione Media
+                    <span class="info-tip" tabindex="0" data-tip="Punteggio medio di soddisfazione stimato dall'assistente al termine di ogni chiamata, calcolato sulle chiamate del periodo per cui è disponibile una valutazione.">?</span>
+                </div>
                 <div class="tile-value" id="avgScore">--</div>
                 <div class="tile-sub" id="avgScoreSub">punteggio chiamata</div>
             </div>
@@ -725,10 +765,17 @@
                 durataSecs: durationToSecs(row['Durata chiamata']),
                 score: row['Soddisfazione'] !== undefined ? parseFloat(row['Soddisfazione']) : NaN,
                 prodotto: (row['Prodotto'] || '').toString().trim(),
+                latencyMs: (row['Latenza media'] !== undefined && Number(row['Latenza turni']) > 0 && !isNaN(Number(row['Latenza media']))) ? Number(row['Latenza media']) : null,
                 hasDurField: row['Durata chiamata'] !== undefined,
                 hasScoreField: row['Soddisfazione'] !== undefined,
-                hasProdField: row['Prodotto'] !== undefined
+                hasProdField: row['Prodotto'] !== undefined,
+                hasLatField: row['Latenza media'] !== undefined
             };
+        }
+        function pctl(sortedAsc, p) {
+            if (!sortedAsc.length) return null;
+            const idx = Math.min(sortedAsc.length - 1, Math.max(0, Math.ceil(p * sortedAsc.length) - 1));
+            return sortedAsc[idx];
         }
         function computeStats(rows) {
             const total = rows.length;
@@ -738,7 +785,8 @@
             const avgDur = durs.length ? durs.reduce((a, b) => a + b, 0) / durs.length : null;
             const scores = rows.map(r => r.score).filter(v => !isNaN(v));
             const avgScore = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
-            return { total, ai, op: total - ai, conv, avgDur, avgScore, nScores: scores.length };
+            const lats = rows.map(r => r.latencyMs).filter(v => v !== null && v > 0).sort((a, b) => a - b);
+            return { total, ai, op: total - ai, conv, avgDur, avgScore, nScores: scores.length, latMedian: pctl(lats, 0.5), latP95: pctl(lats, 0.95), nLat: lats.length };
         }
         function animateValue(elId, target) {
             const el = document.getElementById(elId);
@@ -807,6 +855,18 @@
                 renderDelta('durDelta', stats.avgDur || 0, prevStats.avgDur, null, comparisonEnabled);
             } else {
                 document.getElementById('durDelta').innerHTML = '';
+            }
+
+            // Latenza
+            const hasLat = current.some(r => r.hasLatField);
+            const latEl = document.getElementById('latencyValue');
+            const latSub = document.getElementById('latencySub');
+            if (hasLat && stats.latMedian !== null) {
+                latEl.textContent = (stats.latMedian / 1000).toFixed(1).replace('.', ',') + ' s';
+                latSub.textContent = 'picco p95 ' + (stats.latP95 / 1000).toFixed(1).replace('.', ',') + ' s · ' + stats.nLat.toLocaleString('it-IT') + ' chiamate';
+            } else {
+                latEl.textContent = 'n/d';
+                latSub.textContent = hasLat ? 'nessun dato nel periodo' : 'dato in caricamento';
             }
 
             // Soddisfazione
