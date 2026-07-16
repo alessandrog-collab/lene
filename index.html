@@ -479,6 +479,18 @@
             box-shadow: 0 14px 34px rgba(0,0,0,0.55);
         }
         .info-tip:hover::after, .info-tip:focus::after { opacity: 1; visibility: visible; }
+        /* ===== ANDAMENTO LATENZA + GOVERNANCE ===== */
+        .lat-gran { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+        .gov-scroll { overflow-x: auto; }
+        .gov-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; min-width: 640px; }
+        .gov-table th { text-align: left; color: var(--muted); font-weight: 700; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.12em; padding: 10px 14px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+        .gov-table td { padding: 12px 14px; border-bottom: 1px solid var(--line); color: #cdd5e1; }
+        .gov-table tr:last-child td { border-bottom: none; }
+        .gov-table .mono { font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .gov-badge { display: inline-block; padding: 3px 11px; border-radius: 999px; font-size: 0.76rem; font-weight: 700; }
+        .gov-badge.prod { background: rgba(201,245,66,0.12); color: var(--volt); }
+        .gov-badge.uat { background: rgba(94,234,212,0.12); color: var(--teal); }
+        .gov-badge.sit { background: rgba(168,181,255,0.12); color: var(--indigo); }
     </style>
 </head>
 <body>
@@ -616,6 +628,23 @@
             <div id="daily_chart" style="width: 100%; height: 350px;"></div>
         </div>
 
+        <div class="chart-container">
+            <div class="chart-title">Andamento Latenza</div>
+            <div class="chart-sub">Tempo di risposta tipico (mediana) e picco (p95) nel tempo</div>
+            <div class="lat-gran">
+                <button class="preset-chip active" data-lgran="giorno" onclick="setLatGran('giorno')">Giorno</button>
+                <button class="preset-chip" data-lgran="settimana" onclick="setLatGran('settimana')">Settimana</button>
+                <button class="preset-chip" data-lgran="mese" onclick="setLatGran('mese')">Mese</button>
+            </div>
+            <div id="latency_chart" style="width: 100%; height: 340px; margin-top: 14px;"></div>
+        </div>
+
+        <div class="chart-container">
+            <div class="chart-title">Governance Ambienti</div>
+            <div class="chart-sub">Configurazione attuale di Produzione, UAT e SIT</div>
+            <div class="gov-scroll"><div id="govBox"><div class="empty-msg">Caricamento...</div></div></div>
+        </div>
+
         <div class="footer-note">Goffredo · Voice Agent Lene · dati elaborati automaticamente dalle conversazioni</div>
     </div>
 
@@ -679,8 +708,12 @@
 
         // ===== LOAD =====
         const API_URL = 'https://enel-n8n-clone-u45409.vm.elestio.app/webhook/lene-dashboard-data';
+        const GOV_URL = 'https://enel-n8n-clone-u45409.vm.elestio.app/webhook/lene-governance-data';
+        let latencyRows = [];
+        let latencyGran = 'giorno';
 
         function loadData() {
+            loadGovernance();
             document.getElementById('sankey_chart').innerHTML = `
                 <div class="loading"><div class="loading-spinner"></div><span>Caricamento dati...</span></div>`;
 
@@ -817,6 +850,98 @@
                 <div class="stat-delta-note">vs periodo precedente</div>`;
         }
 
+        // ===== LATENZA NEL TEMPO =====
+        function latBucketKey(iso, gran) {
+            if (gran === 'giorno') return iso;
+            if (gran === 'settimana') {
+                const d = new Date(iso + 'T00:00:00');
+                const off = (d.getDay() + 6) % 7;
+                d.setDate(d.getDate() - off);
+                return fmtISO(d);
+            }
+            return iso.slice(0, 7);
+        }
+        function renderLatencyChart(gran) {
+            const el = document.getElementById('latency_chart');
+            if (!el) return;
+            const rows = latencyRows.filter(r => r.iso && r.latencyMs !== null && r.latencyMs > 0);
+            if (rows.length === 0) {
+                el.innerHTML = '<div class="empty-msg">Latenza non ancora disponibile per il periodo selezionato.</div>';
+                return;
+            }
+            const buckets = {};
+            rows.forEach(r => { const k = latBucketKey(r.iso, gran); (buckets[k] = buckets[k] || []).push(r.latencyMs); });
+            const keys = Object.keys(buckets).sort();
+            const dt = new google.visualization.DataTable();
+            dt.addColumn('string', 'Periodo');
+            dt.addColumn('number', 'Mediana (s)');
+            dt.addColumn('number', 'Picco p95 (s)');
+            keys.forEach(k => {
+                const arr = buckets[k].slice().sort((a, b) => a - b);
+                const med = Math.round(pctl(arr, 0.5) / 100) / 10;
+                const p95 = Math.round(pctl(arr, 0.95) / 100) / 10;
+                let label = k;
+                if (gran !== 'mese') { const p = k.split('-'); label = p[2] + '/' + p[1]; }
+                dt.addRow([label, med, p95]);
+            });
+            const opts = {
+                backgroundColor: 'transparent',
+                legend: { position: 'top', textStyle: { color: '#8a93a6', fontSize: 12, fontName: 'Manrope' } },
+                chartArea: { width: '86%', height: '66%' },
+                hAxis: { textStyle: { color: '#8a93a6', fontSize: 10, fontName: 'Manrope' }, slantedText: true, slantedTextAngle: 45, showTextEvery: Math.max(1, Math.ceil(keys.length / 31)) },
+                vAxis: { textStyle: { color: '#8a93a6', fontName: 'Manrope' }, gridlines: { color: 'rgba(255,255,255,0.05)' }, minValue: 0 },
+                colors: ['#c9f542', '#fb7185'],
+                curveType: 'function',
+                lineWidth: 3,
+                pointSize: 4
+            };
+            new google.visualization.LineChart(el).draw(dt, opts);
+        }
+        function setLatGran(g) {
+            latencyGran = g;
+            document.querySelectorAll('[data-lgran]').forEach(c => c.classList.toggle('active', c.dataset.lgran === g));
+            renderLatencyChart(g);
+        }
+
+        // ===== GOVERNANCE =====
+        function loadGovernance() {
+            const box = document.getElementById('govBox');
+            if (!box) return;
+            fetch(GOV_URL)
+                .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+                .then(t => { const data = (t && t.trim()) ? JSON.parse(t) : []; renderGovernance(data); })
+                .catch(() => { box.innerHTML = '<div class="empty-msg">Pannello governance in attesa del collegamento dati (endpoint non ancora attivo).</div>'; });
+        }
+        function fmtGovDate(val) {
+            if (!val) return 'n/d';
+            let s = String(val).trim().replace(' ', 'T').replace(/([+-]\d{2})$/, '$1:00');
+            const d = new Date(s);
+            if (isNaN(d.getTime())) return String(val);
+            return d.toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Rome' });
+        }
+        function renderGovernance(rows) {
+            const box = document.getElementById('govBox');
+            if (!box) return;
+            if (!Array.isArray(rows) || rows.length === 0) { box.innerHTML = '<div class="empty-msg">Nessun dato di governance.</div>'; return; }
+            const order = { PROD: 0, UAT: 1, SIT: 2 };
+            rows.sort((a, b) => (order[a.environment] ?? 9) - (order[b.environment] ?? 9));
+            const cls = e => e === 'PROD' ? 'prod' : (e === 'UAT' ? 'uat' : 'sit');
+            let html = '<table class="gov-table"><thead><tr><th>Ambiente</th><th>Numero</th><th>Modello LLM</th><th>Voce</th><th>Tool</th><th>Doc KB</th><th>Ultimo aggiornamento</th></tr></thead><tbody>';
+            rows.forEach(r => {
+                html += '<tr>' +
+                    '<td><span class="gov-badge ' + cls(r.environment) + '">' + (r.environment || '') + '</span></td>' +
+                    '<td class="mono">' + (r.numero || 'n/d') + '</td>' +
+                    '<td>' + (r.llm || 'n/d') + '</td>' +
+                    '<td>' + (r.voce || 'n/d') + '</td>' +
+                    '<td>' + (r.tools || 'n/d') + '</td>' +
+                    '<td class="mono">' + (r.kb_docs != null ? r.kb_docs : 'n/d') + '</td>' +
+                    '<td>' + fmtGovDate(r.ultimo_aggiornamento) + '</td>' +
+                    '</tr>';
+            });
+            html += '</tbody></table>';
+            box.innerHTML = html;
+        }
+
         // ===== MAIN =====
         function processData(rows, dateFrom, dateTo, comparisonEnabled) {
             let all = rows
@@ -825,6 +950,8 @@
                 .map(classifyRow);
 
             const current = all.filter(r => r.iso && r.iso >= dateFrom && r.iso <= dateTo);
+            latencyRows = current;
+            renderLatencyChart(latencyGran);
             const previous = comparisonEnabled ? all.filter(r => r.iso && r.iso < dateFrom) : [];
             const stats = computeStats(current);
             const prevStats = comparisonEnabled ? computeStats(previous) : null;
